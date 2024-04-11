@@ -1,0 +1,150 @@
+---
+title: "PART 2C"
+author: "220458845"
+date: "2024-03-02"
+output: html_document
+---
+
+```{r}
+library(readr)      # For reading CSV files
+library(dplyr)      # For data manipulation
+library(tidyr)      # For data tidying
+library(caret)      # For data partitioning
+library(ggplot2)    # For plotting
+library(glmnet)     # For logistic regression with regularization
+
+load_data <- function(base_path, years, nrows = NULL) {
+  dfs <- lapply(years, function(year) {
+    read_csv(paste0(base_path, year, ".csv"), n_max = nrows, show_col_types = FALSE) %>%
+      mutate(Year = year)
+  })
+  bind_rows(dfs)
+}
+
+preprocess_data <- function(flight_data, airports_df) {
+  flight_data <- flight_data %>%
+    left_join(airports_df, by = c("Origin" = "iata")) %>%
+    rename(lat_origin = lat, long_origin = long) %>%
+    left_join(airports_df, by = c("Dest" = "iata")) %>%
+    rename(lat_dest = lat, long_dest = long)
+  return(flight_data)
+}
+
+base_path <- "/Users/lorencialo/downloads/COURSEWORK PROG/dataverse_files/"
+years <- 1995:2004
+
+# Load and preprocess
+flight_data <- load_data(base_path, years, 1000000)  # Limiting to 1,000,000 rows
+airports_df <- read_csv(paste0(base_path, "airports.csv"), show_col_types = FALSE)
+flight_data <- preprocess_data(flight_data, airports_df)
+
+# Select relevant features for the model
+features <- c('DepTime', 'CRSDepTime', 'ArrTime', 'CRSArrTime', 'Distance', 
+              'lat_origin', 'long_origin', 'lat_dest', 'long_dest', 'UniqueCarrier', 'Year')
+target <- 'Diverted'
+
+set.seed(42) # for reproducible splits
+indexes <- createDataPartition(flight_data[[target]], p = .8, list = FALSE)
+train_data <- flight_data[indexes, ]
+test_data <- flight_data[-indexes, ]
+
+```
+
+
+```{r}
+plot_feature_coefs_over_years <- function(data, feature_names, years, target) {
+  for (feature_name in feature_names) {
+    coef_values <- numeric(length(years))
+    names(coef_values) <- as.character(years)
+    
+    for (year in years) {
+      data_year <- data[data$Year == year, ]
+      
+      # Ensure there is enough data and variability in target variable
+      if (nrow(data_year) > 1 && length(unique(data_year[[target]])) > 1) {
+        # Try-Catch block to handle potential glm.fit convergence issues
+        tryCatch({
+          model <- glm(as.formula(paste(target, "~", feature_name)), 
+                       data = data_year, family = binomial(), control = list(maxit = 50)) # Increase max iterations
+          coef_values[as.character(year)] <- coef(model)[feature_name]
+        }, error = function(e) {
+          coef_values[as.character(year)] <- NA # Assign NA on error
+        })
+      } else {
+        coef_values[as.character(year)] <- NA
+      }
+    }
+    
+    # Check if there are any finite values in coef_values to plot
+    if (all(is.na(coef_values))) {
+      message(paste("No finite coefficient values for feature:", feature_name))
+    } else {
+      # Adjusting ylim based on the range of available coefficient values
+      finite_values <- coef_values[!is.na(coef_values)]
+      ylim_range <- range(finite_values, finite = TRUE)
+      plot(years, coef_values, type = 'b', 
+           main = paste("Coefficient Value of", feature_name, "over Years"),
+           xlab = "Year", ylab = "Coefficient Value", ylim = ylim_range)
+    }
+  }
+}
+
+features_to_plot <- setdiff(features, c('UniqueCarrier', 'Year'))
+plot_feature_coefs_over_years(train_data, features_to_plot, as.integer(years), target)
+
+
+```
+
+
+```{r}
+# Define a function to plot coefficients for a categorical feature over years
+plot_coefs_for_categorical_feature_over_years <- function(data, feature_name, categories, years, target) {
+  # Initialize a list to store plots
+  plots <- list()
+  
+  for (category in categories) {
+    coef_values <- numeric(length(years))
+    names(coef_values) <- as.character(years)
+    
+    for (year in years) {
+      data_year <- data[data$Year == year, ]
+      
+      if (nrow(data_year) > 1 && length(unique(data_year[[target]])) > 1) {
+        # Fit the model for the current year
+        model <- glm(as.formula(paste(target, "~", feature_name)), 
+                     data = data_year, family = binomial(), control = list(maxit = 50))
+        
+        # Attempt to extract the coefficient for the current category
+        coef_name <- paste(feature_name, category, sep = "")
+        if (coef_name %in% names(coef(model))) {
+          coef_values[as.character(year)] <- coef(model)[coef_name]
+        } else {
+          coef_values[as.character(year)] <- NA
+        }
+      } else {
+        coef_values[as.character(year)] <- NA
+      }
+    }
+    
+    # Generate the plot for the current category
+    if (!all(is.na(coef_values))) {
+      ylim_range <- range(coef_values, na.rm = TRUE)
+      plot(years, coef_values, type = 'b', 
+           main = paste("Coefficient Value for Unique Carrier", category, "over Years"),
+           xlab = "Year", ylab = "Coefficient Value", ylim = ylim_range)
+      # Store the plot in the list
+      plots[[category]] <- recordPlot()
+    } else {
+      message(paste("No finite coefficient values for category:", category))
+    }
+  }
+  
+  # Return the list of plots
+  return(plots)
+}
+
+unique_carriers <- unique(train_data$UniqueCarrier)
+carrier_plots <- plot_coefs_for_categorical_feature_over_years(train_data, "UniqueCarrier", unique_carriers, as.integer(years), target)
+
+```
+

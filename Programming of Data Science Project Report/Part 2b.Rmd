@@ -1,0 +1,68 @@
+---
+title: "PART 2B"
+author: "220458845"
+date: "2024-03-01"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readr)
+
+base_path <- '/Users/lorencialo/downloads/COURSEWORK PROG/dataverse_files/'
+
+# Function to read and prepare flight data for a single year
+prepare_flight_data <- function(year) {
+  file_path <- paste0(base_path, year, ".csv")
+  read_csv(file_path, col_types = cols_only(
+    TailNum = col_character(),
+    Year = col_double(),
+    DepDelay = col_double(),
+    ArrDelay = col_double()
+  )) %>%
+    mutate(Year = as.numeric(Year), DepDelay = as.numeric(DepDelay), ArrDelay = as.numeric(ArrDelay)) %>%
+    drop_na(TailNum, Year, DepDelay, ArrDelay)
+}
+
+plane_data <- read_csv(paste0(base_path, "plane-data.csv"), col_types = cols_only(
+  tailnum = col_character(),
+  year = col_double()
+)) %>%
+  rename(TailNum = tailnum) %>%
+  mutate(year = as.numeric(year)) %>%
+  drop_na(TailNum, year)
+
+merged_data <- map_df(1995:2004, prepare_flight_data) %>%
+  inner_join(plane_data, by = "TailNum") %>%
+  mutate(PlaneAge = Year - year) %>%
+  filter(PlaneAge >= 0) %>%
+  
+  mutate(year = as.character(year), Year = as.numeric(Year)) %>%
+  filter(year != "None") %>%
+  mutate(year = as.numeric(year)) %>%
+  filter(!is.na(Year), !is.na(year), year >= 1950 & year <= 2024) %>%
+  mutate(PlaneAge = Year - year) %>%
+  filter(PlaneAge >= 0)
+
+# Calculate average delay for each flight
+merged_data <- merged_data %>%
+  mutate(AverageDelay = (DepDelay + ArrDelay) / 2) %>%
+  filter(!is.na(AverageDelay))
+
+# Plotting
+ggplot(merged_data, aes(x = PlaneAge, y = AverageDelay)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(x = "Plane Age", y = "Average Delay (minutes)", title = "Relationship between Plane Age and Average Delay in R") +
+  theme_minimal()
+
+```
+
+```{r}
+# Calculate the Pearson correlation coefficient
+pearson_correlation_coefficient <- cor(merged_data$PlaneAge, merged_data$AverageDelay)
+
+print(paste("Pearson correlation coefficient:", pearson_correlation_coefficient))
+
+```
+
